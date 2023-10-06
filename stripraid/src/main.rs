@@ -3,7 +3,8 @@ use std::{fs::File, io::{self, BufReader, Read, stdout, Write, Seek}, error::Err
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 const STRIPE: usize = 262144;
-const SKIP_ROWS: usize = 4753000 * 1048576 / STRIPE / 12;
+const BUFREADER_SIZE: usize = 1048576;
+const SKIP_ROWS: usize = 1586700;
 const _YOU_SHOULD_SEEK_DD_BY_THIS_MANY_STRIPES: usize = SKIP_ROWS * 12;
 
 macro_rules! warn {
@@ -30,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let files = files.iter()
-        .map(|f| BufReader::with_capacity(STRIPE, f))
+        .map(|f| BufReader::with_capacity(BUFREADER_SIZE, f))
         .collect::<Vec<_>>();
     let datas = files.iter()
         .map(|_| vec![0u8; STRIPE])
@@ -47,17 +48,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let results = pairs.par_iter_mut()
                 .map(|(file, data)| {
-                    // always seek before reading; this not only handles SKIP_ROWS, but also
-                    // ensures that we advance to the correct position after read errors.
-                    // per linux read(2):
-                    //      On error, -1 is returned, and errno is set to indicate the error.
-                    //      In this case, it is left unspecified whether the file position
-                    //      (if any) changes.
-                    // per rust Read::read_exact:
-                    //      If this function returns an error, it is unspecified how many
-                    //      bytes it has read, but it will never read more than would be
-                    //      necessary to completely fill the buffer.
-                    file.seek(io::SeekFrom::Start((row * STRIPE).try_into().unwrap()))?;
                     file.read_exact(data)
                 })
                 .collect::<Vec<_>>();
@@ -66,6 +56,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut data_failed = None;
             for (i, result) in results.iter().enumerate() {
                 if let Err(error) = result {
+                    // if the read failed, seek to the start of the next row.
+                    // we only want to do this if the read failed, because it wipes our BufReader.
+                    // per linux read(2):
+                    //      On error, -1 is returned, and errno is set to indicate the error.
+                    //      In this case, it is left unspecified whether the file position
+                    //      (if any) changes.
+                    // per rust Read::read_exact:
+                    //      If this function returns an error, it is unspecified how many
+                    //      bytes it has read, but it will never read more than would be
+                    //      necessary to completely fill the buffer.
+                    pairs[i].0.seek(io::SeekFrom::Start(((row + 1) * STRIPE).try_into()?))?;
+
                     let kind = if i == q {
                         "q"
                     } else if i == p {
