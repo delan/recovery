@@ -1,0 +1,103 @@
+diff --git a/drivers/md/raid5.c b/drivers/md/raid5.c
+index 7b820b81d8c2..8bae7c195b9a 100644
+--- a/drivers/md/raid5.c
++++ b/drivers/md/raid5.c
+@@ -146,9 +146,9 @@ static int raid6_idx_to_slot(int idx, struct stripe_head *sh,
+ 	if (sh->ddf_layout)
+ 		(*count)++;
+ 	if (idx == sh->pd_idx)
+-		return syndrome_disks;
+-	if (idx == sh->qd_idx)
+ 		return syndrome_disks + 1;
++	if (idx == sh->qd_idx)
++		return syndrome_disks;
+ 	if (!sh->ddf_layout)
+ 		(*count)++;
+ 	return slot;
+@@ -1633,6 +1633,7 @@ static int set_syndrome_sources(struct page **srcs,
+ 	i = d0_idx;
+ 	do {
+ 		int slot = raid6_idx_to_slot(i, sh, &count, syndrome_disks);
++		pr_warn("i=%d slot=%d", i, slot);
+ 		struct r5dev *dev = &sh->dev[i];
+ 
+ 		if (i == sh->qd_idx || i == sh->pd_idx ||
+@@ -1697,8 +1698,8 @@ ops_run_compute6_1(struct stripe_head *sh, struct raid5_percpu *percpu)
+ 
+ 	if (target == qd_idx) {
+ 		count = set_syndrome_sources(blocks, offs, sh, SYNDROME_SRC_ALL);
+-		blocks[count] = NULL; /* regenerating p is not necessary */
+-		BUG_ON(blocks[count+1] != dest); /* q should already be set */
++		blocks[count+1] = NULL; /* regenerating p is not necessary */
++		BUG_ON(blocks[count] != dest); /* q should already be set */
+ 		init_async_submit(&submit, ASYNC_TX_FENCE, NULL,
+ 				  ops_complete_compute, sh,
+ 				  to_addr_conv(sh, percpu, 0));
+@@ -3123,13 +3124,13 @@ sector_t raid5_compute_sector(struct r5conf *conf, sector_t r_sector,
+ 			 * Q D D D P
+ 			 */
+ 			stripe2 += 1;
+-			pd_idx = raid_disks - 1 - sector_div(stripe2, raid_disks);
+-			qd_idx = pd_idx + 1;
+-			if (pd_idx == raid_disks-1) {
+-				(*dd_idx)++;	/* Q D D D P */
+-				qd_idx = 0;
+-			} else if (*dd_idx >= pd_idx)
+-				(*dd_idx) += 2; /* D D P Q D */
++			qd_idx = raid_disks - 1 - sector_div(stripe2, raid_disks);
++			pd_idx = qd_idx + 1;
++			if (qd_idx == raid_disks-1) {
++				(*dd_idx)++;	/* P D D D Q */
++				pd_idx = 0;
++			} else if (*dd_idx >= qd_idx) /* TODO ??? understand this */
++				(*dd_idx) += 2; /* D D Q P D */
+ 			ddf_layout = 1;
+ 			break;
+ 
+@@ -3212,8 +3213,8 @@ sector_t raid5_compute_blocknr(struct stripe_head *sh, int i, int previous)
+ 	chunk_offset = sector_div(new_sector, sectors_per_chunk);
+ 	stripe = new_sector;
+ 
+-	if (i == sh->pd_idx)
+-		return 0;
++	if (i == sh->qd_idx) // TODO ??? understand this
++		return 0; /* It is the Q disk */
+ 	switch(conf->level) {
+ 	case 4: break;
+ 	case 5:
+@@ -3239,17 +3240,17 @@ sector_t raid5_compute_blocknr(struct stripe_head *sh, int i, int previous)
+ 		}
+ 		break;
+ 	case 6:
+-		if (i == sh->qd_idx)
+-			return 0; /* It is the Q disk */
++		if (i == sh->pd_idx) // TODO ??? understand this
++			return 0; /* It is the P disk */
+ 		switch (algorithm) {
+ 		case ALGORITHM_LEFT_ASYMMETRIC:
+ 		case ALGORITHM_RIGHT_ASYMMETRIC:
+ 		case ALGORITHM_ROTATING_ZERO_RESTART:
+ 		case ALGORITHM_ROTATING_N_RESTART:
+-			if (sh->pd_idx == raid_disks-1)
+-				i--;	/* Q D D D P */
+-			else if (i > sh->pd_idx)
+-				i -= 2; /* D D P Q D */
++			if (sh->qd_idx == raid_disks-1)
++				i--;	/* P D D D Q */
++			else if (i > sh->qd_idx)
++				i -= 2; /* D D Q P D */
+ 			break;
+ 		case ALGORITHM_LEFT_SYMMETRIC:
+ 		case ALGORITHM_RIGHT_SYMMETRIC:
+@@ -3303,6 +3304,11 @@ sector_t raid5_compute_blocknr(struct stripe_head *sh, int i, int previous)
+ 
+ 	check = raid5_compute_sector(conf, r_sector,
+ 				     previous, &dummy1, &sh2);
++	pr_warn("(%llu,%llu) (%llu,%llu) (%llu,%llu) (%llu,%llu)",
++		check, sh->sector,
++		dummy1, dd_idx,
++		sh2.pd_idx, sh->pd_idx,
++		sh2.qd_idx, sh->qd_idx);
+ 	if (check != sh->sector || dummy1 != dd_idx || sh2.pd_idx != sh->pd_idx
+ 		|| sh2.qd_idx != sh->qd_idx) {
+ 		pr_warn("md/raid:%s: compute_blocknr: map not correct\n",
