@@ -31,31 +31,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     // }
 
     // adaptec puts q before p in the first stripe (row)
-    let mut candidates = PickPQ::new(datas.len())
+    let mut candidates = (0..datas.len())
         .collect::<BTreeSet<_>>();
     eprintln!("{:?}", candidates);
     for offset in 0usize..STRIPE {
-        for &(q, p) in candidates.clone().iter() {
-            let expected = datas[p][offset];
-            let actual = datas.iter()
-                .enumerate()
-                .filter(|(i, _)| *i != q && *i != p)
-                .map(|(_, x)| x[offset])
-                // .inspect(|x| eprintln!("{:02X}h", x))
-                .reduce(|r, x| r ^ x)
-                .unwrap();
-            // eprintln!("({},{}) => {:02X} => {}", q, p, actual, actual == expected);
-            // eprintln!("{:02X}h <<< {:02X}h", actual, expected);
-            if actual != expected {
-                candidates.remove(&(q, p));
+        // xor all disks = data ^ p ^ q = p ^ p ^ q = q
+        let xor = datas.iter()
+            .map(|x| x[offset])
+            .reduce(|r, x| r ^ x)
+            .unwrap();
+        // remove disks that can’t be q
+        for &q in candidates.clone().iter() {
+            if datas[q][offset] != xor {
+                candidates.remove(&q);
             }
         }
         eprintln!("{:016X} >>> {} candidates: {:?}", offset, candidates.len(), candidates);
-        let qs = candidates.iter().map(|(q, _)| q)
-            .collect::<BTreeSet<_>>();
-        // eprintln!("{:?}", ps);
-        if qs.len() == 1 {
-            eprintln!("found q = {}", qs.iter().next().unwrap());
+        if candidates.len() == 1 {
+            eprintln!("found q = {}", candidates.iter().next().unwrap());
             break;
         }
     }
