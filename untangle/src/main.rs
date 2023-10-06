@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for (i, file) in files.iter_mut().enumerate() {
         file.read_exact(&mut datas[i])?;
     }
+    eprintln!("reading done");
 
     // ReedSolomon::new(files.len(), parity_shards)
     // for offset in 0usize..16 {
