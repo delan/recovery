@@ -63,7 +63,7 @@ struct PickPQ {
 
 impl PickPQ {
     fn new(n: usize) -> Self {
-        Self { n, p: 0, q: 0 }
+        Self { n, p: 0, q: 1 }
     }
 }
 
