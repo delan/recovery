@@ -1,0 +1,79 @@
+diff --git a/Makefile b/Makefile
+index 3de08d8..5d97e73 100644
+--- a/Makefile
++++ b/Makefile
+@@ -5,6 +5,6 @@ CFLAGS = -g --std=c99
+ 
+ test: r6parity.c galoisfield.o parity.o
+ 	cc ${CFLAGS} -o r6parity $^
+-	./r6parity
++	# ./r6parity
+ clean:
+ 	rm -f *.o r6parity
+diff --git a/galoisfield.c b/galoisfield.c
+index 25d743a..9ebb17f 100644
+--- a/galoisfield.c
++++ b/galoisfield.c
+@@ -12,7 +12,7 @@
+ uint8_t *gfilog;
+ uint8_t *gflog;
+ 
+-int gfsetup()
++void gfsetup()
+ {
+   gfilog = (uint8_t *) malloc(255 * sizeof(uint8_t));
+   gflog  = (uint8_t *) malloc(255 * sizeof(uint8_t));
+diff --git a/r6parity.c b/r6parity.c
+index ded116c..4de81cc 100644
+--- a/r6parity.c
++++ b/r6parity.c
+@@ -15,17 +15,43 @@ void print_array(uint8_t *data, size_t len)
+   printf("\n");
+ }
+ 
+-int main()
++int main(int argc, char **argv)
+ {
+   gfsetup();
+ 
+-  uint8_t data[12] = "\x1d\x55\x55\x55\x55\x55\x55\x55\x55\x55\x55\x55";
++  uint8_t raws[][14] = {
++    // 0   1   2   3   4   5   6   7   8   9   10  11  12  13
++    "\x55\x55\x55\x55\x55\x48\x58\x55\x55\x55\x1d\x55\x55\x55",
++    "\xaa\xaa\xaa\xaa\xaa\x90\xb0\xaa\xaa\xaa\x3a\xaa\xaa\xaa",
++    "\x4b\x00\x48\x48\x1c\xf9\x00\x0a\xd9\x41\x43\xdc\x2f\xc4",
++    "\xf6\x00\x5a\xc9\x26\x9e\x00\xb1\x7e\x08\xb0\x79\x19\x03",
++  };
++  uint8_t *raw = argc > 1 ? raws[atoi(argv[1])] : raws[0];
++  size_t raw_len = sizeof(raws[0]) / sizeof(uint8_t);
++  printf(">>> ");
++  print_array(raw, raw_len);
++
++  uint8_t data[12] = "\0\0\0\0\0\0\0\0\0\0\0\0";
+   size_t data_len = sizeof(data) / sizeof(uint8_t);
+-  // print_array(data, data_len);
++  for (size_t i = 0; i < raw_len; i++) {
++    for (size_t j = i + 1; j < raw_len; j++) {
++      // copy raw to data, punching out i and j
++      for (size_t p = 0, q = 0; q < raw_len; q++)
++        if (q != i && q != j)
++          data[p++] = raw[q];
++
++      uint8_t p = xor(data, data_len);
++      uint8_t q = rs(data, data_len);
++
++      printf("%zu %zu %02Xh %02Xh", i, j, p, q);
++      if (p == raw[i] || p == raw[j])
++        printf(" !!!");
++      printf("\n");
+ 
+-  uint8_t p = xor(data, data_len);
+-  uint8_t q = rs(data, data_len);
+-  printf("%02x %02x\n", p, q);
++      // if (p == raw[i] || p == raw[j])
++      //   printf("%zu %zu\n", i, j);
++    }
++  }
+ 
+   return 0;
+ }
