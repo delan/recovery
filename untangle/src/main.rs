@@ -1,16 +1,21 @@
-use std::{fs::File, io::{self, BufReader, Read}, error::Error, collections::HashSet};
+use std::{fs::File, io::{self, BufReader, Read}, error::Error, collections::BTreeSet};
 
 use reed_solomon_erasure::galois_8::ReedSolomon;
+
+const SECTOR: usize = 512;
+const STRIPE: usize = 262144;
+const READ_BS: usize = 1048576;
+const READ_LIMIT: usize = 16777216;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let files = std::env::args().skip(1)
         .map(File::open)
         .collect::<io::Result<Vec<_>>>()?;
     let mut files = files.iter()
-        .map(|f| BufReader::with_capacity(1048576, f))
+        .map(|f| BufReader::with_capacity(READ_BS, f))
         .collect::<Vec<_>>();
     let mut datas = files.iter()
-        .map(|_| vec![0u8; 16777216])
+        .map(|_| vec![0u8; READ_LIMIT])
         .collect::<Vec<Vec<u8>>>();
     for (i, file) in files.iter_mut().enumerate() {
         file.read_exact(&mut datas[i])?;
@@ -27,25 +32,28 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // adaptec puts q before p in the first stripe (row)
     let mut candidates = PickPQ::new(datas.len())
-        .collect::<HashSet<_>>();
+        .collect::<BTreeSet<_>>();
     eprintln!("{:?}", candidates);
-    for offset in 0usize..262144 {
+    for offset in 0usize..STRIPE {
         for &(q, p) in candidates.clone().iter() {
             let expected = datas[p][offset];
             let actual = datas.iter()
                 .enumerate()
                 .filter(|(i, _)| *i != q && *i != p)
                 .map(|(_, x)| x[offset])
+                // .inspect(|x| eprintln!("{:02X}h", x))
                 .reduce(|r, x| r ^ x)
                 .unwrap();
             // eprintln!("({},{}) => {:02X} => {}", q, p, actual, actual == expected);
+            // eprintln!("{:02X}h <<< {:02X}h", actual, expected);
             if actual != expected {
                 candidates.remove(&(q, p));
             }
         }
-        eprintln!("{:016X} {:?}", offset, candidates);
+        eprintln!("{:016X} >>> {} candidates: {:?}", offset, candidates.len(), candidates);
         let qs = candidates.iter().map(|(q, _)| q)
-            .collect::<HashSet<_>>();
+            .collect::<BTreeSet<_>>();
+        // eprintln!("{:?}", ps);
         if qs.len() == 1 {
             eprintln!("found q = {}", qs.iter().next().unwrap());
             break;
