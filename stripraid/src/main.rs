@@ -47,6 +47,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let results = pairs.par_iter_mut()
                 .map(|(file, data)| {
+                    // always seek before reading; this not only handles SKIP_ROWS, but also
+                    // ensures that we advance to the correct position after read errors.
+                    // per linux read(2):
+                    //      On error, -1 is returned, and errno is set to indicate the error.
+                    //      In this case, it is left unspecified whether the file position
+                    //      (if any) changes.
+                    // per rust Read::read_exact:
+                    //      If this function returns an error, it is unspecified how many
+                    //      bytes it has read, but it will never read more than would be
+                    //      necessary to completely fill the buffer.
+                    file.seek(io::SeekFrom::Start((row * STRIPE).try_into().unwrap()))?;
                     file.read_exact(data)
                 })
                 .collect::<Vec<_>>();
