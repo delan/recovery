@@ -1,55 +1,62 @@
 use std::{fs::File, io::{self, BufReader, Read}, error::Error, collections::BTreeSet};
 
-use reed_solomon_erasure::galois_8::ReedSolomon;
-
-const SECTOR: usize = 512;
 const STRIPE: usize = 262144;
-const READ_BS: usize = 1048576;
-const READ_LIMIT: usize = 16777216;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let files = std::env::args().skip(1)
         .map(File::open)
         .collect::<io::Result<Vec<_>>>()?;
     let mut files = files.iter()
-        .map(|f| BufReader::with_capacity(READ_BS, f))
+        .map(|f| BufReader::with_capacity(STRIPE, f))
         .collect::<Vec<_>>();
-    let mut datas = files.iter()
-        .map(|_| vec![0u8; READ_LIMIT])
-        .collect::<Vec<Vec<u8>>>();
-    for (i, file) in files.iter_mut().enumerate() {
-        file.read_exact(&mut datas[i])?;
-    }
-    eprintln!("reading done");
+    let mut order = vec![None; files.len()];
 
-    // ReedSolomon::new(files.len(), parity_shards)
-    // for offset in 0usize..16 {
-    //     print!("{:016X}", offset);
-    //     for disk in 0..datas.len() {
-    //         print!(" {:02X}", datas[disk][offset]);
-    //     }
-    //     println!();
-    // }
+    for row in 0.. {
+        let mut datas = files.iter()
+            .map(|_| vec![0u8; STRIPE])
+            .collect::<Vec<Vec<u8>>>();
+        for (i, file) in files.iter_mut().enumerate() {
+            file.read_exact(&mut datas[i])?;
+        }
 
-    // adaptec puts q before p in the first stripe (row)
-    let mut candidates = (0..datas.len())
-        .collect::<BTreeSet<_>>();
-    eprintln!("{:?}", candidates);
-    for offset in 0usize..STRIPE {
-        // xor all disks = data ^ p ^ q = p ^ p ^ q = q
-        let xor = datas.iter()
-            .map(|x| x[offset])
-            .reduce(|r, x| r ^ x)
-            .unwrap();
-        // remove disks that can’t be q
-        for &q in candidates.clone().iter() {
-            if datas[q][offset] != xor {
-                candidates.remove(&q);
+        let mut candidates = (0..datas.len())
+            .collect::<BTreeSet<_>>();
+        // eprintln!("{:?}", candidates);
+        for offset in 0usize..STRIPE {
+            // xor all disks = data ^ p ^ q = p ^ p ^ q = q
+            let xor = datas.iter()
+                .map(|x| x[offset])
+                .reduce(|r, x| r ^ x)
+                .unwrap();
+            // remove disks that can’t be q
+            for &q in candidates.clone().iter() {
+                if datas[q][offset] != xor {
+                    candidates.remove(&q);
+                }
+            }
+            // eprintln!("{:016X} >>> {} candidates: {:?}", offset, candidates.len(), candidates);
+            if candidates.len() == 1 {
+                let q = candidates.iter().next().unwrap().clone();
+                eprintln!("stripe {}: found q = {} at offset {:X}h", row, q, offset);
+                let i = row % order.len();
+                if let Some(old) = order[i] {
+                    assert_eq!(q, old);
+                } else {
+                    order[i] = Some(q);
+                }
+                break;
             }
         }
-        eprintln!("{:016X} >>> {} candidates: {:?}", offset, candidates.len(), candidates);
-        if candidates.len() == 1 {
-            eprintln!("found q = {}", candidates.iter().next().unwrap());
+        if candidates.len() > 1 {
+            eprintln!("stripe {}: no q found", row);
+        }
+
+        if order.iter().all(|x| x.is_some()) {
+            let order = order.iter().map(|x| x.unwrap()).collect::<Vec<_>>();
+            // adaptec puts q before p in the first stripe (row), so the actual
+            // order is from right to left starting from the second last index,
+            // followed by the last index
+            println!("order is {:?}", order);
             break;
         }
     }
