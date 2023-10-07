@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .transpose()?;
     let skip_rows = std::env::var("STRIPRAID_SKIP_ROWS").unwrap_or("0".to_owned());
     let skip_rows = usize::from_str_radix(&skip_rows, 10)?;
+    let raid6 = std::env::var_os("STRIPRAID_RAID5").is_none();
 
     let mut out = stdout().lock();
     let mut files = std::env::args().skip(1)
@@ -40,7 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .zip(datas.into_iter())
         .collect::<Vec<_>>();
 
-    let mut q = pairs.len() - 2;
+    let mut q = raid6.then(|| pairs.len() - 2);
     let mut p = pairs.len() - 1;
     for row in 0.. {
         if row >= skip_rows {
@@ -68,7 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     //      necessary to completely fill the buffer.
                     pairs[i].0.seek(io::SeekFrom::Start(((row + 1) * STRIPE).try_into()?))?;
 
-                    let kind = if i == q {
+                    let kind = if Some(i) == q {
                         "q"
                     } else if i == p {
                         "p"
@@ -79,7 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         log, "warning: {:?}\nwarning: read error at row {} disk {} ({})",
                         error, row, i, kind,
                     );
-                    if i == q {
+                    if Some(i) == q {
                         q_failed = true;
                     } else if i == p {
                         p_failed = true;
@@ -104,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 warn!(log, "warning: restoring data from xor parity (p)");
                 let xor = pairs.iter()
                     .enumerate()
-                    .filter(|(i, _)| *i != q && *i != f)
+                    .filter(|(i, _)| Some(*i) != q && *i != f)
                     .map(|(_, (_, data))| data)
                     .cloned()
                     .reduce(|p, q| {
@@ -124,7 +125,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // check xor parity (p)
                 let xor = pairs.iter()
                     .enumerate()
-                    .filter(|(i, _)| *i != q)
+                    .filter(|(i, _)| Some(*i) != q)
                     .map(|(_, (_, data))| data)
                     .cloned()
                     .reduce(|p, q| {
@@ -146,7 +147,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let t3 = Instant::now();
 
             for (i, (_, data)) in pairs.iter().enumerate() {
-                if i != p && i != q {
+                if Some(i) != q && i != p {
                     out.write_all(data)?;
                 }
             }
@@ -157,11 +158,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 );
             }
         }
-        q = if q == 0 {
+        q = q.map(|q| if q == 0 {
             pairs.len() - 1
         } else {
             q - 1
-        };
+        });
         p = if p == 0 {
             pairs.len() - 1
         } else {
