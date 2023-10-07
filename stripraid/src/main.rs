@@ -4,8 +4,6 @@ use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 const STRIPE: usize = 262144;
 const BUFREADER_SIZE: usize = 1048576;
-const SKIP_ROWS: usize = 1586700;
-const _YOU_SHOULD_SEEK_DD_BY_THIS_MANY_STRIPES: usize = SKIP_ROWS * 12;
 
 macro_rules! warn {
     ($sink:expr, $fmt:literal $(, $arg:expr)* $(,)*) => {{
@@ -21,13 +19,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .write(true)
         .create_new(true)
         .open(std::env::var("STRIPRAID_LOG")?)?;
+    let skip_rows = std::env::var("STRIPRAID_SKIP_ROWS").unwrap_or("0".to_owned());
+    let skip_rows = usize::from_str_radix(&skip_rows, 10)?;
 
     let mut out = stdout().lock();
     let mut files = std::env::args().skip(1)
         .map(File::open)
         .collect::<io::Result<Vec<_>>>()?;
     for file in files.iter_mut() {
-        file.seek(io::SeekFrom::Start((SKIP_ROWS * STRIPE).try_into()?))?;
+        file.seek(io::SeekFrom::Start((skip_rows * STRIPE).try_into()?))?;
     }
 
     let files = files.iter()
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut q = pairs.len() - 2;
     let mut p = pairs.len() - 1;
     for row in 0.. {
-        if row >= SKIP_ROWS {
+        if row >= skip_rows {
             let t1 = Instant::now();
 
             let results = pairs.par_iter_mut()
