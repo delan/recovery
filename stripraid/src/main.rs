@@ -8,17 +8,17 @@ const BUFREADER_SIZE: usize = 1048576;
 macro_rules! warn {
     ($sink:expr, $fmt:literal $(, $arg:expr)* $(,)*) => {{
         let msg = format!($fmt $(, $arg)*);
-        writeln!($sink, "{}", msg)?;
+        if let Some(sink) = $sink.as_mut() {
+            writeln!(sink, "{}", msg)?;
+        }
         eprintln!("{}", msg);
     }};
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut log = File::options()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(std::env::var("STRIPRAID_LOG")?)?;
+    let mut log = std::env::var("STRIPRAID_LOG").ok()
+        .map(|x| File::options().read(true).write(true).create_new(true).open(x))
+        .transpose()?;
     let skip_rows = std::env::var("STRIPRAID_SKIP_ROWS").unwrap_or("0".to_owned());
     let skip_rows = usize::from_str_radix(&skip_rows, 10)?;
 
